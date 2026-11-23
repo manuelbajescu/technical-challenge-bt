@@ -14,8 +14,6 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
-  AZURE_RESOURCE_GROUP: rg-mycdent-dev-mcd26x
-  AKS_CLUSTER_NAME: aks-mycdent-dev-mcd26x
   ACR_NAME: mycdentdevmcd26x
   ACR_LOGIN_SERVER: mycdentdevmcd26x.azurecr.io
   IMAGE_NAME: order-backend
@@ -40,10 +38,10 @@ jobs:
           helm lint helm/app-chart
           helm template order-backend helm/app-chart --namespace orders > /dev/null
 
-  deploy:
+  publish:
     needs: test
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: [self-hosted, linux, aks-vnet]
+    runs-on: ubuntu-24.04
     environment: production
     permissions:
       contents: read
@@ -68,22 +66,3 @@ jobs:
           tags: ${{ env.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
           sbom: true
           provenance: mode=max
-      - name: Install kubelogin
-        uses: azure/use-kubelogin@v1
-        with:
-          kubelogin-version: v0.2.22
-      - name: Set AKS context
-        uses: azure/aks-set-context@v4
-        with:
-          resource-group: ${{ env.AZURE_RESOURCE_GROUP }}
-          cluster-name: ${{ env.AKS_CLUSTER_NAME }}
-          admin: "false"
-          use-kubelogin: "true"
-      - uses: azure/setup-helm@v4
-      - name: Deploy to AKS
-        run: |
-          helm upgrade --install order-backend helm/app-chart \
-            --namespace orders \
-            --set-string image.repository="$ACR_LOGIN_SERVER/$IMAGE_NAME" \
-            --set-string image.tag="$GITHUB_SHA" \
-            --atomic --wait --timeout 10m
