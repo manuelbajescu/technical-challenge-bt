@@ -15,7 +15,8 @@ database:
   host: postgresql-service.default.svc.cluster.local
   port: 5432
   user: superuser
-  password: "MasterDatabasePasswordUnhashed!2026"
+  secretName: order-backend-db
+  secretKey: password
   name: production_db
 
 service:

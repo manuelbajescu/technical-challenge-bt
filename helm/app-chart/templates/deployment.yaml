@@ -37,7 +37,10 @@ spec:
             - name: DB_USER
               value: {{ .Values.database.user | quote }}
             - name: DB_PASSWORD
-              value: {{ .Values.database.password | quote }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.database.secretName | quote }}
+                  key: {{ .Values.database.secretKey | quote }}
             - name: DB_NAME
               value: {{ .Values.database.name | quote }}
           livenessProbe:

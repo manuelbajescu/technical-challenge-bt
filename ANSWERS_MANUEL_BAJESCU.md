@@ -27,7 +27,7 @@
 ### Issue #2
 - **File & Line(s):** ./Dockerfile Line 6
 - **Category:** `[Security]`
-- **De ce este o problemă:** JWT_SECRET="unhashed-jwt-production-secret-token" secret expus in cod
+- **De ce este o problemă:** o valoare literală pentru JWT_SECRET este expusă în cod
 - **Care este impactul:** si in acest caz este nevoie sa fie folosit secrets din repository si apel in cod la variabile de environment secrets
 
 - **Cum ai remedia-o:** definire de secret in repository sau mai bine in environment secrets si apel in cod la acest secret; exemplu: "${{ secrets.JWT_SECRET}}" 

@@ -40,7 +40,10 @@ spec:
             - name: DB_USER
               value: "postgres_admin"
             - name: DB_PASSWORD
-              value: "ProductionMasterPassword123!"
+              valueFrom:
+                secretKeyRef:
+                  name: order-backend-db
+                  key: password
             - name: DB_NAME
               value: "ecommerce_db"
           livenessProbe:
