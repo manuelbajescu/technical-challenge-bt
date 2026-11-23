@@ -1,57 +1,122 @@
-# Application Configuration Values
-replicaCount: 1
-
-image:
-  repository: mycdentdevmcd26x.azurecr.io/order-backend
-  pullPolicy: IfNotPresent
-  tag: "latest"
-
-imagePullSecrets: []
-nameOverride: ""
-fullnameOverride: ""
-
-database:
-  enabled: true
-  host: postgresql-service.default.svc.cluster.local
-  port: 5432
-  user: superuser
-  secretName: order-backend-db
-  secretKey: password
-  name: production_db
-
-service:
-  type: LoadBalancer
-  port: 80
-  targetPort: 8080
-
-ingress:
-  enabled: true
-  className: "nginx"
-  annotations:
-    nginx.ingress.kubernetes.io/ssl-redirect: "false"
-  hosts:
-    - host: "*"
-      paths:
-        - path: /
-          pathType: Prefix
-        - path: /admin
-          pathType: Prefix
-        - path: /metrics
-          pathType: Prefix
-  tls: []
-
-resources:
-  limits:
-    cpu: 2000m
-    memory: 4Gi
-  requests: {}
-
-autoscaling:
-  enabled: true
-  minReplicas: 1
-  maxReplicas: 100
-  targetCPUUtilizationPercentage: 1
-
-nodeSelector: {}
-tolerations: []
-affinity: {}
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: orders
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: order-backend
+  namespace: orders
+  labels:
+    app.kubernetes.io/name: order-backend
+spec:
+  replicas: 2
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: order-backend
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: order-backend
+    spec:
+      serviceAccountName: order-backend
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: backend
+          image: mycompany-registry.io/apps/order-backend:1.0.0@sha256:<digest>
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - secretRef:
+                name: order-backend-db
+          env:
+            - name: ENVIRONMENT
+              value: production
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 15
+            timeoutSeconds: 2
+            failureThreshold: 3
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 5
+            failureThreshold: 24
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            privileged: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: order-backend
+  namespace: orders
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: order-backend
+  namespace: orders
+spec:
+  selector:
+    app.kubernetes.io/name: order-backend
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: order-backend
+  namespace: orders
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: order-backend
