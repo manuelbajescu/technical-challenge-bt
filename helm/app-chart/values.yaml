@@ -2,7 +2,7 @@
 replicaCount: 1
 
 image:
-  repository: mycompany-registry.io/apps/order-backend
+  repository: mycdentdevmcd26x.azurecr.io/order-backend
   pullPolicy: IfNotPresent
   tag: "latest"
 
@@ -22,7 +22,7 @@ database:
 service:
   type: LoadBalancer
   port: 80
-  targetPort: 8000
+  targetPort: 8080
 
 ingress:
   enabled: true

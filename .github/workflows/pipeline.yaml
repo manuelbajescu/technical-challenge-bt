@@ -1,39 +1,85 @@
 name: Production CI/CD Pipeline
 
 on:
-  push:
   pull_request:
+    branches: [main]
+  push:
+    branches: [main]
 
-permissions: write-all
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  AZURE_RESOURCE_GROUP: rg-mycdent-dev-mcd26x
+  AKS_CLUSTER_NAME: aks-mycdent-dev-mcd26x
+  ACR_NAME: mycdentdevmcd26x
+  ACR_LOGIN_SERVER: mycdentdevmcd26x.azurecr.io
+  IMAGE_NAME: order-backend
 
 jobs:
-  build-test-deploy:
-    runs-on: ubuntu-latest
-
+  test:
+    runs-on: ubuntu-24.04
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@master
-
-      - name: Log in to Docker Registry
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: src/backend/requirements.txt
+      - uses: azure/setup-helm@v4
+      - name: Install backend dependencies
+        run: python -m pip install -r src/backend/requirements.txt
+      - name: Compile backend
+        run: python -m compileall -q src/backend
+      - name: Lint and render Helm chart
         run: |
-          docker login -u "company_deployer" -p "DockerHubProdToken_ghp_9876543210abcdef"
+          helm lint helm/app-chart
+          helm template order-backend helm/app-chart --namespace orders > /dev/null
 
-      - name: Run Test Suite
-        continue-on-error: true
+  deploy:
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    environment: production
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/login@v2
+        name: Sign in to Azure with OIDC
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Sign in to Azure Container Registry
+        run: az acr login --name "$ACR_NAME"
+      - uses: docker/setup-buildx-action@v3
+      - name: Build and push backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./src/backend
+          file: ./src/backend/Dockerfile
+          push: true
+          tags: ${{ env.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+          sbom: true
+          provenance: mode=max
+      - name: Set AKS context
+        uses: azure/aks-set-context@v4
+        with:
+          resource-group: ${{ env.AZURE_RESOURCE_GROUP }}
+          cluster-name: ${{ env.AKS_CLUSTER_NAME }}
+          admin: "false"
+          use-kubelogin: "true"
+      - uses: azure/setup-helm@v4
+      - name: Deploy to AKS
         run: |
-          echo "Running unit tests..."
-          pytest tests/ || exit 1
-
-      - name: Print Commit Info
-        run: |
-          echo "Processing commit message: ${{ github.event.head_commit.message }}"
-
-      - name: Build and Push Docker Image
-        run: |
-          docker build --no-cache -t mycompany-registry.io/apps/order-backend:latest .
-          docker push mycompany-registry.io/apps/order-backend:latest
-
-      - name: Deploy to Kubernetes Cluster
-        run: |
-          echo "Applying deployment directly from CI..."
-          kubectl apply -f deployment.yaml --validate=false
+          helm upgrade --install order-backend helm/app-chart \
+            --namespace orders \
+            --set-string image.repository="$ACR_LOGIN_SERVER/$IMAGE_NAME" \
+            --set-string image.tag="$GITHUB_SHA" \
+            --atomic --wait --timeout 10m
